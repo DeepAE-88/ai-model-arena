@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Кролики против зомби</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0f0f14;
+            color: #eee;
+            font-family: system-ui, Arial, sans-serif;
+        }
+
+        #wrap {
+            position: relative;
+        }
+
+        #game {
+            display: block;
+            width: 100vw;
+            height: 70vh;
+            background: #88c0d0;
+            outline: none;
+        }
+
+        #ui {
+            position: relative;
+            width: 100vw;
+            height: 30vh;
+            background: #171a21;
+            color: #ddd;
+            box-sizing: border-box;
+            display: flex;
+            gap: 24px;
+            padding: 12px 16px;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+
+        .panel {
+            background: #1f242e;
+            border: 1px solid #2a3341;
+            border-radius: 8px;
+            padding: 10px 12px;
+            min-width: 220px;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .panel h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #fff;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        button,
+        select {
+            background: #2a3341;
+            color: #e3eef9;
+            border: 1px solid #3a4a61;
+            border-radius: 6px;
+            padding: 6px 10px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #334057;
+        }
+
+        .legend {
+            font-size: 12px;
+            color: #adbac7;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: #2b6cb0;
+            font-size: 12px;
+            margin-left: 6px;
+        }
+
+        .stat {
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .warn {
+            color: #ffd166;
+        }
+
+        .good {
+            color: #a3e635;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="wrap">
+        <canvas id="game" tabindex="0"></canvas>
+        <div id="ui">
+            <div class="panel" style="min-width:280px;">
+                <h3>Боекомплект</h3>
+                <div>Выбрано: <span id="selectedAmmo" class="badge">Капуста</span></div>
+                <div>Капуста: <span id="cabbageCount" class="stat">0</span></div>
+                <div>Морковь: <span id="carrotCount" class="stat">0</span></div>
+                <div class="legend">ЛКМ — выстрел; ПКМ — переключить снаряд</div>
+                <div class="legend">Наводите и держите — пушка начнёт дрожать сильнее</div>
+            </div>
+
+            <div class="panel">
+                <h3>Кролик и пушка</h3>
+                <div class="row">
+                    <label for="rabbitSel">Кролик:</label>
+                    <select id="rabbitSel"></select>
+                </div>
+                <div class="row" style="margin-top:6px;">
+                    <label for="startSel">Местность старта:</label>
+                    <select id="startSel">
+                        <option value="peak">На вершине</option>
+                        <option value="valley">Во впадине</option>
+                    </select>
+                </div>
+                <div class="row" style="margin-top:6px;">
+                    <button id="restartBtn">Перезапуск</button>
+                </div>
+                <div style="margin-top:6px;">
+                    Сердца базы: <span id="lives" class="stat">3</span>
+                </div>
+            </div>
+
+            <div class="panel" style="flex:1; min-width:300px;">
+                <h3>Огород</h3>
+                <div class="legend">Клик по грядке — действие. Инструмент:</div>
+                <div class="row" style="margin:6px 0;">
+                    <button id="toolPlantCabbage">Посадить капусту</button>
+                    <button id="toolPlantCarrot">Посадить морковь</button>
+                    <button id="toolWater">Полить</button>
+                    <button id="toolHarvest">Собрать</button>
+                </div>
+                <div class="legend">Влага ускоряет рост; без ухода растения чахнут.</div>
+                <div>Вода: <span id="water" class="stat">∞</span></div>
+                <div class="legend">Капуста даёт 1 снаряд; Морковь — 6 снарядов-группу.</div>
+            </div>
+
+            <div class="panel" style="min-width:260px;">
+                <h3>Подсказки</h3>
+                <ul style="margin:0 0 0 16px; padding:0;">
+                    <li>Капуста — одиночный точный выстрел</li>
+                    <li>Морковь — залп, урон по площади</li>
+                    <li>Урон ∝ импульсу снаряда</li>
+                    <li>Зомби бронированы по-разному</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (() => {
+            // ===================== Config and Utilities =====================
+            const canvas = document.getElementById('game');
+            const ctx = canvas.getContext('2d', { alpha: false });
+            const ui = {
+                cabbageCount: document.getElementById('cabbageCount'),
+                carrotCount: document.getElementById('carrotCount'),
+                selectedAmmo: document.getElementById('selectedAmmo'),
+                rabbitSel: document.getElementById('rabbitSel'),
+                startSel: document.getElementById('startSel'),
+                restartBtn: document.getElementById('restartBtn'),
+                water: document.getElementById('water'),
+                lives: document.getElementById('lives'),
+                toolPlantCabbage: document.getElementById('toolPlantCabbage'),
+                toolPlantCarrot: document.getElementById('toolPlantCarrot'),
+                toolWater: document.getElementById('toolWater'),
+                toolHarvest: document.getElementById('toolHarvest'),
+            };
+
+            function resize() {
+                const ratio = window.devicePixelRatio || 1;
+                const cssW = canvas.clientWidth;
+                const cssH = canvas.clientHeight;
+                canvas.width = Math.floor(cssW * ratio);
+                canvas.height = Math.floor(cssH * ratio);
+                ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+            }
+            window.addEventListener('resize', resize);
+
+            const TAU = Math.PI * 2;
+            const rand = (a = 1, b = 0) => Math.random() * (b - a) + a;
+            const clamp = (x, min, max) => Math.min(max, Math.max(min, x));
+            const lerp = (a, b, t) => a + (b - a) * t;
+            const now = () => performance.now();
+
+            // ===================== Game State =====================
+            const GAME = {
+                width: 0,
+                height: 0,
+                groundY: x => 0,
+                groundSlope: x => 0,
+                time: 0,
+                dt: 0,
+                lastTime: 0,
+                paused: false,
+                over: false,
+                lives: 3,
+                wind: 0, // not used heavily, can expand
+                startMode: 'peak',
+            };
+
+            // ===================== Terrain =====================
+            function makeTerrain(width, height, mode = 'peak') {
+                const A1 = height * 0.10;
+                const A2 = height * 0.06;
+                const k1 = (TAU / (width * 1.2));
+                const k2 = (TAU / (width * 0.55));
+                const phase = (mode === 'peak') ? 0 : Math.PI; // peak or valley at left
+                const base = height * 0.75;
+                return {
+                    y(x) {
+                        return base + A1 * Math.sin(k1 * x + phase) + A2 * Math.sin(k2 * x * 0.9 + 0.6);
+                    },
+                    slope(x) {
+                        return A1 * k1 * Math.cos(k1 * x + phase) + A2 * 0.9 * k2 * Math.cos(k2 * x * 0.9 + 0.6);
+                    }
+                };
+            }
+
+            // ===================== Input (Mouse) =====================
+            const input = {
+                x: 0, y: 0, down: false, rdown: false, inside: false, click: false, rclick: false
+            };
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                input.x = e.clientX - rect.left;
+                input.y = e.clientY - rect.top;
+                input.inside = (input.x >= 0 && input.y >= 0 && input.x <= canvas.clientWidth && input.y <= canvas.clientHeight);
+            });
+            canvas.addEventListener('mouseenter', () => input.inside = true);
+            canvas.addEventListener('mouseleave', () => input.inside = false);
+            canvas.addEventListener('mousedown', (e) => {
+                if (e.button === 0) { input.down = true; input.click = true; }
+                if (e.button === 2) { input.rdown = true; input.rclick = true; }
+            });
+            canvas.addEventListener('mouseup', (e) => {
+                if (e.button === 0) input.down = false;
+                if (e.button === 2) input.rdown = false;
+            });
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            // ===================== Rabbit and Cannon =====================
+            const RABBITS = [
+                { id: 'balanced', name: 'Классический', baseStability: 0.006, maxJitter: 0.10, jitterGrow: 0.25, cannonPower: 1.00, farmBonus: 1.00 },
+                { id: 'sniper', name: 'Снайпер', baseStability: 0.003, maxJitter: 0.06, jitterGrow: 0.18, cannonPower: 0.95, farmBonus: 0.90 },
+                { id: 'brawler', name: 'Берсерк', baseStability: 0.010, maxJitter: 0.16, jitterGrow: 0.35, cannonPower: 1.12, farmBonus: 1.00 },
+                { id: 'farmer', name: 'Агроном', baseStability: 0.008, maxJitter: 0.12, jitterGrow: 0.22, cannonPower: 0.92, farmBonus: 1.25 },
+            ];
+
+            let rabbit = RABBITS[0];
+
+            // Cannon mechanics with jitter growth when aim is held still
+            const cannon = {
+                x: 140,
+                y: 0, // will be set to ground
+                angle: -0.4,
+                aimAngle: -0.4,
+                holdTime: 0,
+                lastAimAngle: 0,
+                swayT: 0,
+                selectedAmmo: 'cabbage',
+                // stats
+                baseStability: rabbit.baseStability,
+                maxJitter: rabbit.maxJitter,
+                jitterGrow: rabbit.jitterGrow,
+                cannonPower: rabbit.cannonPower,
+            };
+
+            function setRabbit(r) {
+                rabbit = r;
+                cannon.baseStability = r.baseStability;
+                cannon.maxJitter = r.maxJitter;
+                cannon.jitterGrow = r.jitterGrow;
+                cannon.cannonPower = r.cannonPower;
+            }
+
+            // ===================== Ammo and Inventory =====================
+            const inventory = { cabbage: 1, carrot: 0 }; // start minimal
+            function updateAmmoUI() {
+                ui.cabbageCount.textContent = inventory.cabbage | 0;
+                ui.carrotCount.textContent = inventory.carrot | 0;
+                ui.selectedAmmo.textContent = (cannon.selectedAmmo === 'cabbage' ? 'Капуста' : 'Морковь');
+            }
+
+            // ===================== Projectiles with Quadratic Drag =====================
+            // F_drag = -k * v * |v|, where k encapsulates (rho * Cd * A / m)
+            const projectiles = [];
+            const particleFX = [];
+
+            function spawnParticles(x, y, color, n = 8, speed = 120, life = 0.4) {
+                for (let i = 0; i < n; i++) {
+                    particleFX.push({
+                        x, y,
+                        vx: Math.cos(rand(0, TAU)) * rand(speed * 0.5, speed),
+                        vy: Math.sin(rand(0, TAU)) * rand(speed * 0.5, speed),
+                        life: life, t: 0, color
+                    });
+                }
+            }
+
+            function addProjectile(p) {
+                projectiles.push(p);
+            }
+
+            function fireCabbage(x, y, angle) {
+                if (inventory.cabbage <= 0) return;
+                inventory.cabbage--;
+                updateAmmoUI();
+                const speed = 720 * cannon.cannonPower;
+                const vx = Math.cos(angle) * speed;
+                const vy = Math.sin(angle) * speed;
+                addProjectile({
+                    type: 'cabbage',
+                    x, y,
+                    vx, vy,
+                    r: 10,
+                    mass: 2.5,
+                    kdrag: 0.0009, // tuned coefficient
+                    color: '#9acd32',
+                    alive: true
+                });
+            }
+
+            function fireCarrotVolley(x, y, angle) {
+                if (inventory.carrot <= 0) return;
+                inventory.carrot--;
+                updateAmmoUI();
+                const pellets = 6; // group shot
+                const baseSpeed = 820 * cannon.cannonPower;
+                for (let i = 0; i < pellets; i++) {
+                    const spread = rand(-0.10, 0.10);
+                    const speed = baseSpeed * rand(0.92, 1.05);
+                    const vx = Math.cos(angle + spread) * speed;
+                    const vy = Math.sin(angle + spread) * speed;
+                    addProjectile({
+                        type: 'carrot',
+                        x, y,
+                        vx, vy,
+                        r: 4.5,
+                        mass: 0.55,
+                        kdrag: 0.0018,
+                        color: '#ff9f1c',
+                        alive: true
+                    });
+                }
+            }
+
+            function projectileUpdate(p, dt) {
+                if (!p.alive) return;
+                const g = 900; // px/s^2
+                // Quadratic drag
+                const v = Math.hypot(p.vx, p.vy);
+                const ax = -p.kdrag * p.vx * v;
+                const ay = g - p.kdrag * p.vy * v;
+
+                // Integration (semi-implicit Euler)
+                p.vx += ax * dt;
+                p.vy += ay * dt;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                // Check ground
+                const gy = GAME.groundY(p.x);
+                if (p.y + p.r >= gy) {
+                    // Impact with ground
+                    impactGround(p);
+                    p.alive = false;
+                    return;
+                }
+                // Check out of bounds
+                if (p.x < -100 || p.x > GAME.width + 200 || p.y > GAME.height + 200) {
+                    p.alive = false;
+                }
+            }
+
+            function impactGround(p) {
+                spawnParticles(p.x, GAME.groundY(p.x) - p.r, p.color, p.type === 'carrot' ? 10 : 8, 140, 0.5);
+                if (p.type === 'carrot') {
+                    // AoE splash on ground
+                    const speed = Math.hypot(p.vx, p.vy);
+                    const impulse = p.mass * speed;
+                    const baseDmg = 0.065 * impulse;
+                    const R = clamp(40 + impulse * 0.04, 60, 120);
+                    aoeDamage(p.x, GAME.groundY(p.x) - p.r - 2, R, baseDmg);
+                    particleFX.push({ // flash circle
+                        x: p.x, y: GAME.groundY(p.x) - p.r - 2,
+                        vx: 0, vy: 0, life: 0.25, t: 0, color: 'rgba(255,160,64,0.35)', aoe: R
+                    });
+                }
+            }
+
+            // ===================== Zombies =====================
+            const zombies = [];
+            const ZOMBIE_TYPES = [
+                { id: 'walker', name: 'Шатун', hp: 130, armor: 0.12, speed: 16, size: 28, color: '#6b8e23' },
+                { id: 'runner', name: 'Бегун', hp: 90, armor: 0.05, speed: 26, size: 24, color: '#88b04b' },
+                { id: 'bucket', name: 'Кастрюльник', hp: 260, armor: 0.35, speed: 14, size: 30, color: '#5a7d2b' },
+                { id: 'brute', name: 'Бугай', hp: 420, armor: 0.22, speed: 11, size: 36, color: '#4f6f1d' },
+            ];
+
+            function spawnZombie() {
+                const t = ZOMBIE_TYPES[Math.floor(rand(0, ZOMBIE_TYPES.length))];
+                const x = GAME.width + rand(20, 200);
+                const y = GAME.groundY(x);
+                zombies.push({
+                    type: t,
+                    x, y,
+                    hp: t.hp,
+                    speed: t.speed * rand(0.95, 1.05),
+                    size: t.size,
+                    color: t.color,
+                    t: 0, // anim phase
+                    alive: true,
+                });
+            }
+
+            function zombieUpdate(z, dt) {
+                if (!z.alive) return;
+                z.x -= z.speed * dt;
+                z.y = GAME.groundY(z.x);
+                z.t += dt * z.speed * 0.08;
+                if (z.x < cannon.x - 20) {
+                    z.alive = false;
+                    damageBase();
+                }
+            }
+
+            function damageBase() {
+                if (GAME.over) return;
+                GAME.lives = Math.max(0, GAME.lives - 1);
+                ui.lives.textContent = GAME.lives;
+                if (GAME.lives <= 0) {
+                    GAME.over = true;
+                }
+            }
+
+            // ===================== Collisions and Damage =====================
+            function circleRectCollision(cx, cy, cr, rx, ry, rw, rh) {
+                // clamp point to rectangle
+                const nx = clamp(cx, rx, rx + rw);
+                const ny = clamp(cy, ry, ry + rh);
+                const dx = cx - nx;
+                const dy = cy - ny;
+                return (dx * dx + dy * dy) <= (cr * cr);
+            }
+
+            function hitZombie(z, p, impactX, impactY) {
+                // Absolutely inelastic: projectile sticks/vanishes; damage ∝ projectile impulse
+                const speed = Math.hypot(p.vx, p.vy);
+                const impulse = p.mass * speed;
+                // Armor reduces damage multiplicatively
+                const dmgFactor = 0.065; // tuned vs zombie hp
+                let dmg = dmgFactor * impulse * (1 - z.type.armor);
+                if (p.type === 'carrot') {
+                    // Small bonus for carrots on direct hit; plus AoE below
+                    dmg *= 0.8;
+                }
+                z.hp -= dmg;
+
+                spawnParticles(impactX, impactY, p.color, 8, 160, 0.4);
+                if (p.type === 'carrot') {
+                    // AoE around impact point
+                    const R = clamp(36 + impulse * 0.03, 50, 110);
+                    aoeDamage(impactX, impactY, R, dmg * 0.80);
+                    particleFX.push({ x: impactX, y: impactY, vx: 0, vy: 0, life: 0.22, t: 0, color: 'rgba(255,160,64,0.35)', aoe: R });
+                }
+
+                p.alive = false;
+                if (z.hp <= 0) {
+                    z.alive = false;
+                    spawnParticles(z.x, z.y - z.size * 0.7, '#8fbc8f', 14, 180, 0.6);
+                    // chance to drop seed? optional
+                }
+            }
+
+            function aoeDamage(x, y, R, baseDmg) {
+                for (const z of zombies) {
+                    if (!z.alive) continue;
+                    const zx = z.x, zy = z.y - z.size * 0.6;
+                    const d = Math.hypot(zx - x, zy - y);
+                    if (d <= R) {
+                        const falloff = 1 - (d / R);
+                        const dmg = baseDmg * (0.35 + 0.65 * falloff);
+                        z.hp -= dmg * (1 - z.type.armor);
+                        if (z.hp <= 0) {
+                            z.alive = false;
+                            spawnParticles(zx, zy, '#8fbc8f', 12, 170, 0.5);
+                        }
+                    }
+                }
+            }
+
+            function handleProjectileZombieCollisions(p) {
+                // Treat zombies approximately as upright rounded rectangles
+                for (const z of zombies) {
+                    if (!z.alive) continue;
+                    const w = z.size * 0.9, h = z.size * 1.6;
+                    const rx = z.x - w / 2;
+                    const ry = z.y - h;
+                    if (circleRectCollision(p.x, p.y, p.r, rx, ry, w, h)) {
+                        hitZombie(z, p, p.x, p.y);
+                        return; // projectile consumed
+                    }
+                }
+            }
+
+            // ===================== Garden (Farm) =====================
+            const GARDEN = {
+                x: 24, y: 24, cols: 4, rows: 2, cell: 48,
+                tool: 'plantCabbage',
+                cells: [],
+                farmBonus: 1.0
+            };
+            function gardenInit() {
+                GARDEN.cells = [];
+                for (let r = 0; r < GARDEN.rows; r++) {
+                    for (let c = 0; c < GARDEN.cols; c++) {
+                        GARDEN.cells.push({ type: 'empty', growth: 0, moisture: 0.5, t: 0 });
+                    }
+                }
+                GARDEN.farmBonus = rabbit.farmBonus;
+            }
+
+            function gardenDraw(ctx) {
+                // Panel background handled by UI; we draw on canvas a small board in top-left corner of game area
+                const gx = 16, gy = 16;
+                ctx.save();
+                ctx.translate(gx, gy);
+                ctx.fillStyle = 'rgba(0,0,0,0.18)';
+                ctx.fillRect(-6, -6, GARDEN.cols * GARDEN.cell + 12, GARDEN.rows * GARDEN.cell + 12);
+                for (let r = 0; r < GARDEN.rows; r++) {
+                    for (let c = 0; c < GARDEN.cols; c++) {
+                        const i = r * GARDEN.cols + c;
+                        const cell = GARDEN.cells[i];
+                        const x = c * GARDEN.cell, y = r * GARDEN.cell;
+                        // soil
+                        ctx.fillStyle = '#5a3d24';
+                        ctx.fillRect(x, y, GARDEN.cell - 2, GARDEN.cell - 2);
+                        // moisture overlay
+                        ctx.fillStyle = `rgba(64,120,200,${clamp(cell.moisture, 0, 1) * 0.18})`;
+                        ctx.fillRect(x, y, GARDEN.cell - 2, GARDEN.cell - 2);
+                        // plant
+                        if (cell.type !== 'empty') {
+                            const g = clamp(cell.growth, 0, 1);
+                            if (cell.type === 'cabbage') {
+                                ctx.fillStyle = '#9acd32';
+                                ctx.beginPath();
+                                ctx.arc(x + 24, y + 28 - 16 * g, 10 + 12 * g, 0, TAU);
+                                ctx.fill();
+                            } else if (cell.type === 'carrot') {
+                                ctx.fillStyle = '#ff9f1c';
+                                const h = 6 + 20 * g;
+                                ctx.fillRect(x + 20, y + 36 - h, 8, h);
+                                ctx.fillStyle = '#84cc16';
+                                ctx.beginPath();
+                                ctx.moveTo(x + 24, y + 36 - h);
+                                ctx.lineTo(x + 14, y + 36 - h - 8);
+                                ctx.lineTo(x + 34, y + 36 - h - 8);
+                                ctx.fill();
+                            }
+                        }
+                        // border
+                        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                        ctx.strokeRect(x, y, GARDEN.cell - 2, GARDEN.cell - 2);
+                    }
+                }
+                ctx.restore();
+            }
+
+            function gardenUpdate(dt) {
+                for (const cell of GARDEN.cells) {
+                    if (cell.type === 'empty') continue;
+                    const growthRate = (cell.type === 'cabbage' ? 0.010 : 0.013) * GARDEN.farmBonus;
+                    // Moisture decays
+                    cell.moisture = clamp(cell.moisture - dt * 0.06, 0, 1);
+                    const moistureFactor = lerp(0.2, 1.2, cell.moisture);
+                    // Poor care penalty if too dry
+                    const healthFactor = (cell.moisture < 0.15) ? 0.4 : 1.0;
+                    cell.growth = clamp(cell.growth + dt * growthRate * moistureFactor * healthFactor, 0, 1);
+                }
+            }
+
+            function gardenHandleClick(mx, my) {
+                // Convert canvas pos to garden cell
+                const gx = 16, gy = 16;
+                const x = mx - gx, y = my - gy;
+                if (x < 0 || y < 0) return false;
+                const c = Math.floor(x / GARDEN.cell);
+                const r = Math.floor(y / GARDEN.cell);
+                if (c < 0 || r < 0 || c >= GARDEN.cols || r >= GARDEN.rows) return false;
+                const i = r * GARDEN.cols + c;
+                const cell = GARDEN.cells[i];
+
+                if (GARDEN.tool === 'plantCabbage') {
+                    if (cell.type === 'empty') { cell.type = 'cabbage'; cell.growth = 0; cell.moisture = 0.6; }
+                } else if (GARDEN.tool === 'plantCarrot') {
+                    if (cell.type === 'empty') { cell.type = 'carrot'; cell.growth = 0; cell.moisture = 0.6; }
+                } else if (GARDEN.tool === 'water') {
+                    cell.moisture = clamp(cell.moisture + 0.5, 0, 1);
+                    spawnParticles(16 + (i % GARDEN.cols) * GARDEN.cell + 24, 16 + Math.floor(i / GARDEN.cols) * GARDEN.cell + 24, '#4aa3ff', 6, 80, 0.3);
+                } else if (GARDEN.tool === 'harvest') {
+                    if (cell.type !== 'empty' && cell.growth >= 0.999) {
+                        if (cell.type === 'cabbage') {
+                            inventory.cabbage += 1;
+                        } else if (cell.type === 'carrot') {
+                            inventory.carrot += 1; // one volley pack
+                        }
+                        updateAmmoUI();
+                        cell.type = 'empty';
+                        cell.growth = 0; cell.moisture = 0.4;
+                        spawnParticles(16 + (i % GARDEN.cols) * GARDEN.cell + 24, 16 + Math.floor(i / GARDEN.cols) * GARDEN.cell + 24, '#a3e635', 10, 140, 0.4);
+                    }
+                }
+                return true;
+            }
+
+            // ===================== Spawner and Game Loop =====================
+            let spawnTimer = 0;
+            function updateSpawn(dt) {
+                if (GAME.over) return;
+                spawnTimer -= dt;
+                if (spawnTimer <= 0) {
+                    spawnZombie();
+                    spawnTimer = lerp(3.0, 1.2, clamp(GAME.time / 180, 0, 1)) * rand(0.7, 1.3);
+                }
+            }
+
+            function updateProjectiles(dt) {
+                for (const p of projectiles) {
+                    projectileUpdate(p, dt);
+                    if (!p.alive) continue;
+                    handleProjectileZombieCollisions(p);
+                }
+                // remove dead
+                for (let i = projectiles.length - 1; i >= 0; i--) if (!projectiles[i].alive) projectiles.splice(i, 1);
+            }
+
+            function updateZombies(dt) {
+                for (const z of zombies) zombieUpdate(z, dt);
+                for (let i = zombies.length - 1; i >= 0; i--) if (!zombies[i].alive) zombies.splice(i, 1);
+            }
+
+            function updateParticles(dt) {
+                for (const p of particleFX) {
+                    p.t += dt;
+                    p.x += p.vx * dt;
+                    p.y += p.vy * dt;
+                }
+                for (let i = particleFX.length - 1; i >= 0; i--) {
+                    const p = particleFX[i];
+                    if (p.t >= p.life) particleFX.splice(i, 1);
+                }
+            }
+
+            function updateCannon(dt) {
+                // place cannon on ground
+                cannon.y = GAME.groundY(cannon.x) - 20;
+
+                // aim at mouse
+                const dx = input.x - cannon.x;
+                const dy = input.y - cannon.y;
+                const targetAngle = Math.atan2(dy, dx);
+
+                // detect hold still to grow jitter
+                const dAng = Math.abs(shortestAngleDiff(targetAngle, cannon.lastAimAngle));
+                const still = dAng < 0.005;
+                if (still) {
+                    cannon.holdTime += dt;
+                } else {
+                    cannon.holdTime = Math.max(0, cannon.holdTime - dt * 0.6);
+                }
+                cannon.lastAimAngle = targetAngle;
+
+                // jitter magnitude
+                const base = cannon.baseStability;      // baseline jitter
+                const grow = cannon.jitterGrow;         // how fast jitter grows when holding
+                const maxJ = cannon.maxJitter;          // cap
+                const jitterAmp = clamp(base + grow * cannon.holdTime, base, maxJ);
+
+                // smooth swell + noise
+                cannon.swayT += dt;
+                const sway = Math.sin(cannon.swayT * 2.6) * jitterAmp * 0.35;
+                const noise = (Math.sin(cannon.swayT * 3.7 + 1.7) + Math.sin(cannon.swayT * 5.1 + 0.3)) * 0.5 * jitterAmp * 0.65;
+
+                cannon.aimAngle = targetAngle + sway + noise;
+                cannon.angle = cannon.aimAngle;
+            }
+
+            function shortestAngleDiff(a, b) {
+                let d = (a - b + Math.PI) % (TAU);
+                if (d < 0) d += TAU;
+                return d - Math.PI;
+            }
+
+            function tryShoot() {
+                const muzzleX = cannon.x + Math.cos(cannon.angle) * 34;
+                const muzzleY = cannon.y + Math.sin(cannon.angle) * 34 - 4;
+                if (cannon.selectedAmmo === 'cabbage') {
+                    fireCabbage(muzzleX, muzzleY, cannon.angle);
+                } else {
+                    fireCarrotVolley(muzzleX, muzzleY, cannon.angle);
+                }
+            }
+
+            // ===================== Rendering =====================
+            function drawBackground() {
+                // sky gradient
+                const g = ctx.createLinearGradient(0, 0, 0, GAME.height);
+                g.addColorStop(0, '#bfe8ff');
+                g.addColorStop(1, '#dff4ff');
+                ctx.fillStyle = g;
+                ctx.fillRect(0, 0, GAME.width, GAME.height);
+
+                // distant hills
+                ctx.fillStyle = '#a5d0b1';
+                for (let i = 0; i < 8; i++) {
+                    const y = GAME.height * 0.65 + Math.sin(i * 0.7 + GAME.time * 0.02) * 6;
+                    ctx.beginPath();
+                    ctx.ellipse(i * GAME.width / 7, y, 120, 35, 0, 0, TAU);
+                    ctx.fill();
+                }
+            }
+
+            function drawTerrain() {
+                ctx.beginPath();
+                ctx.moveTo(0, GAME.groundY(0));
+                const step = 6;
+                for (let x = 0; x <= GAME.width; x += step) {
+                    ctx.lineTo(x, GAME.groundY(x));
+                }
+                ctx.lineTo(GAME.width, GAME.height);
+                ctx.lineTo(0, GAME.height);
+                ctx.closePath();
+                ctx.fillStyle = '#5ea760';
+                ctx.fill();
+
+                // top line
+                ctx.strokeStyle = '#2f6f31';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (let x = 0; x <= GAME.width; x += step) {
+                    ctx.lineTo(x, GAME.groundY(x));
+                }
+                ctx.stroke();
+            }
+
+            function drawCannon() {
+                // base
+                const baseY = GAME.groundY(cannon.x);
+                ctx.fillStyle = '#5c4d3a';
+                ctx.fillRect(cannon.x - 28, baseY - 16, 56, 16);
+                // body
+                ctx.save();
+                ctx.translate(cannon.x, cannon.y);
+                ctx.rotate(cannon.angle);
+                // barrel
+                ctx.fillStyle = '#2b2f3a';
+                ctx.fillRect(0, -7, 38, 14);
+                ctx.fillStyle = '#3d4454';
+                ctx.fillRect(5, -6, 30, 12);
+                // mount
+                ctx.fillStyle = '#3b2f23';
+                ctx.beginPath();
+                ctx.arc(0, 0, 12, 0, TAU);
+                ctx.fill();
+                ctx.restore();
+
+                // bunny
+                drawBunny(cannon.x - 20, baseY - 28);
+            }
+
+            function drawBunny(x, y) {
+                // simple stylized bunny
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.fillStyle = '#f1e9dc';
+                // body
+                ctx.beginPath();
+                ctx.ellipse(0, 14, 12, 16, 0, 0, TAU);
+                ctx.fill();
+                // head
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 10, 9, 0, 0, TAU);
+                ctx.fill();
+                // ears
+                ctx.fillStyle = '#f1e9dc';
+                ctx.fillRect(-6, -20, 5, 16);
+                ctx.fillRect(1, -20, 5, 16);
+                ctx.fillStyle = '#f5b7c2';
+                ctx.fillRect(-5, -18, 3, 12);
+                ctx.fillRect(2, -18, 3, 12);
+                // eye
+                ctx.fillStyle = '#2b2f3a';
+                ctx.fillRect(4, -4, 2.5, 2.5);
+                ctx.restore();
+            }
+
+            function drawZombies() {
+                for (const z of zombies) {
+                    const w = z.size * 0.9, h = z.size * 1.6;
+                    const bob = Math.sin(z.t * TAU) * 3;
+                    // shadow
+                    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                    ctx.beginPath();
+                    ctx.ellipse(z.x, z.y + 2, w * 0.48, 6, 0, 0, TAU);
+                    ctx.fill();
+                    // body
+                    ctx.fillStyle = z.color;
+                    ctx.fillRect(z.x - w / 2, z.y - h + bob, w, h);
+                    // head
+                    ctx.fillStyle = '#cde5c1';
+                    ctx.beginPath();
+                    ctx.arc(z.x, z.y - h + 12 + bob, z.size * 0.45, 0, TAU);
+                    ctx.fill();
+                    // helmet/armor hint
+                    ctx.fillStyle = 'rgba(60,70,80,0.35)';
+                    ctx.fillRect(z.x - w / 2, z.y - h + bob, w, 8);
+                    // hp bar
+                    const hpPct = clamp(z.hp / z.type.hp, 0, 1);
+                    ctx.fillStyle = '#222';
+                    ctx.fillRect(z.x - w / 2, z.y - h - 10, w, 5);
+                    ctx.fillStyle = hpPct > 0.5 ? '#88f27a' : hpPct > 0.25 ? '#ffd166' : '#ef4444';
+                    ctx.fillRect(z.x - w / 2, z.y - h - 10, w * hpPct, 5);
+                }
+            }
+
+            function drawProjectiles() {
+                ctx.save();
+                for (const p of projectiles) {
+                    // trail
+                    ctx.globalAlpha = 0.2;
+                    ctx.strokeStyle = p.color;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const backX = p.x - p.vx * 0.05;
+                    const backY = p.y - p.vy * 0.05;
+                    ctx.moveTo(backX, backY);
+                    ctx.lineTo(p.x, p.y);
+                    ctx.stroke();
+
+                    ctx.globalAlpha = 1;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.r, 0, TAU);
+                    ctx.fill();
+                    ctx.strokeStyle = '#00000022';
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            function drawParticles() {
+                for (const p of particleFX) {
+                    const a = 1 - p.t / p.life;
+                    if (p.aoe) {
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, lerp(0, p.aoe, a), 0, TAU);
+                        ctx.fillStyle = p.color;
+                        ctx.fill();
+                    } else {
+                        ctx.fillStyle = p.color.replace('rgb', 'rgba').replace(')', `, ${a.toFixed(2)})`);
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 2.5, 0, TAU);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            function drawUIInCanvas() {
+                // ammo quick hint near cannon
+                ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                ctx.fillRect(cannon.x - 50, cannon.y - 60, 100, 22);
+                ctx.fillStyle = '#e3eef9';
+                ctx.font = '12px system-ui, Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Снаряд: ${cannon.selectedAmmo === 'cabbage' ? 'Капуста' : 'Морковь'}`, cannon.x, cannon.y - 44);
+
+                // Garden small board overlay
+                gardenDraw(ctx);
+
+                // Game over overlay
+                if (GAME.over) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                    ctx.fillRect(0, 0, GAME.width, GAME.height);
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 42px system-ui, Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Зомби добрались до базы!', GAME.width / 2, GAME.height / 2 - 16);
+                    ctx.font = '18px system-ui, Arial';
+                    ctx.fillText('Нажмите "Перезапуск" для новой попытки', GAME.width / 2, GAME.height / 2 + 18);
+                }
+            }
+
+            // ===================== Main Loop =====================
+            function loop(t) {
+                const cur = t || now();
+                GAME.dt = clamp((cur - GAME.lastTime) / 1000, 0, 0.033);
+                GAME.lastTime = cur;
+                if (!GAME.paused && !GAME.over) GAME.time += GAME.dt;
+
+                // Updates
+                updateCannon(GAME.dt);
+                gardenUpdate(GAME.dt);
+                updateSpawn(GAME.dt);
+                updateProjectiles(GAME.dt);
+                updateZombies(GAME.dt);
+                updateParticles(GAME.dt);
+
+                // Render
+                ctx.clearRect(0, 0, GAME.width, GAME.height);
+                drawBackground();
+                drawTerrain();
+                drawZombies();
+                drawProjectiles();
+                drawCannon();
+                drawParticles();
+                drawUIInCanvas();
+
+                // Input edge events
+                if (input.click && !GAME.over) {
+                    // try garden click first
+                    const gardenClicked = gardenHandleClick(input.x, input.y);
+                    if (!gardenClicked) {
+                        tryShoot();
+                    }
+                }
+                if (input.rclick && !GAME.over) {
+                    cannon.selectedAmmo = (cannon.selectedAmmo === 'cabbage' ? 'carrot' : 'cabbage');
+                    updateAmmoUI();
+                }
+                input.click = false;
+                input.rclick = false;
+
+                requestAnimationFrame(loop);
+            }
+
+            // ===================== Init and Restart =====================
+            function restart() {
+                resize();
+                GAME.width = canvas.clientWidth;
+                GAME.height = canvas.clientHeight;
+                // Terrain
+                const terr = makeTerrain(GAME.width, GAME.height, GAME.startMode);
+                GAME.groundY = terr.y;
+                GAME.groundSlope = terr.slope;
+                // Reset entities
+                projectiles.length = 0;
+                particleFX.length = 0;
+                zombies.length = 0;
+                spawnTimer = 1.0;
+                GAME.time = 0;
+                GAME.lastTime = now();
+                GAME.over = false;
+                GAME.lives = 3;
+                ui.lives.textContent = GAME.lives;
+
+                // Cannon position (left side)
+                cannon.x = 140;
+                cannon.y = GAME.groundY(cannon.x) - 20;
+                cannon.angle = -0.4;
+                cannon.aimAngle = cannon.angle;
+                cannon.holdTime = 0;
+
+                // Inventory baseline
+                inventory.cabbage = 2;
+                inventory.carrot = 0;
+                updateAmmoUI();
+
+                // Garden
+                gardenInit();
+
+                // A few starting zombies delay
+            }
+
+            // ===================== Wire UI =====================
+            function populateRabbitSel() {
+                ui.rabbitSel.innerHTML = '';
+                for (const r of RABBITS) {
+                    const opt = document.createElement('option');
+                    opt.value = r.id;
+                    opt.textContent = r.name;
+                    ui.rabbitSel.appendChild(opt);
+                }
+                ui.rabbitSel.value = rabbit.id;
+            }
+
+            ui.rabbitSel.addEventListener('change', () => {
+                const sel = RABBITS.find(r => r.id === ui.rabbitSel.value) || RABBITS[0];
+                setRabbit(sel);
+                GARDEN.farmBonus = rabbit.farmBonus;
+            });
+            ui.startSel.addEventListener('change', () => {
+                GAME.startMode = ui.startSel.value === 'valley' ? 'valley' : 'peak';
+            });
+            ui.restartBtn.addEventListener('click', () => restart());
+
+            ui.toolPlantCabbage.addEventListener('click', () => GARDEN.tool = 'plantCabbage');
+            ui.toolPlantCarrot.addEventListener('click', () => GARDEN.tool = 'plantCarrot');
+            ui.toolWater.addEventListener('click', () => GARDEN.tool = 'water');
+            ui.toolHarvest.addEventListener('click', () => GARDEN.tool = 'harvest');
+
+            // Init
+            populateRabbitSel();
+            updateAmmoUI();
+            resize();
+            GAME.width = canvas.clientWidth;
+            GAME.height = canvas.clientHeight;
+            GAME.startMode = ui.startSel.value === 'valley' ? 'valley' : 'peak';
+            const terr = makeTerrain(GAME.width, GAME.height, GAME.startMode);
+            GAME.groundY = terr.y;
+            GAME.groundSlope = terr.slope;
+            gardenInit();
+            GAME.lastTime = now();
+            requestAnimationFrame(loop);
+
+        })();
+    </script>
+</body>
+
+</html>
